@@ -1,5 +1,6 @@
 package com.distelli.graphql.apigen;
 
+import graphql.language.Comment;
 import graphql.language.Definition;
 import graphql.language.EnumTypeDefinition;
 import graphql.language.EnumValueDefinition;
@@ -8,6 +9,7 @@ import graphql.language.InputObjectTypeDefinition;
 import graphql.language.InputValueDefinition;
 import graphql.language.InterfaceTypeDefinition;
 import graphql.language.ListType;
+import graphql.language.Node;
 import graphql.language.NonNullType;
 import graphql.language.ObjectTypeDefinition;
 import graphql.language.OperationTypeDefinition;
@@ -17,6 +19,7 @@ import graphql.language.Type;
 import graphql.language.TypeName;
 import graphql.language.UnionTypeDefinition;
 import graphql.language.Value;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -47,6 +50,12 @@ public class STModel {
             put("Char", "Character");
             put("Float", "Double");
         }};
+    private enum Nullability {
+        NULLABLE,
+        NON_NULLABLE,
+        NON_NULLABLE_CONTENT
+    }
+
     public static class Builder {
         private TypeEntry typeEntry;
         private Map<String, TypeEntry> referenceTypes;
@@ -90,13 +99,17 @@ public class STModel {
     public static class Field {
         public String name;
         public String type;
+        public Nullability nullability;
+        public String javadoc;
         public DataResolver dataResolver;
         public String graphQLType;
         public List<Arg> args;
         public String defaultValue;
-        public Field(String name, String type) {
+        public Field(String name, String type, Nullability nullability, String javadoc) {
             this.name = name;
             this.type = type;
+            this.nullability = nullability;
+            this.javadoc = javadoc;
         }
         public String getUcname() {
             return ucFirst(name);
@@ -265,7 +278,7 @@ public class STModel {
     private List<Field> getFields(ObjectTypeDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()));
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.graphQLType = toGraphQLType(fieldDef.getType());
             field.dataResolver = toDataResolver(fieldDef.getType());
             field.args = toArgs(fieldDef.getInputValueDefinitions());
@@ -277,7 +290,7 @@ public class STModel {
     private List<Field> getFields(InterfaceTypeDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()));
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.args = toArgs(fieldDef.getInputValueDefinitions());
             fields.add(field);
         }
@@ -287,7 +300,7 @@ public class STModel {
     private List<Field> getFields(InputObjectTypeDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( InputValueDefinition fieldDef : def.getInputValueDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()));
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.graphQLType = toGraphQLType(fieldDef.getType());
             field.defaultValue = toJavaValue(fieldDef.getDefaultValue());
             fields.add(field);
@@ -298,7 +311,7 @@ public class STModel {
     private List<Field> getFields(UnionTypeDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( Type type : def.getMemberTypes() ) {
-            fields.add(new Field(null, toJavaTypeName(type)));
+            fields.add(new Field(null, toJavaTypeName(type), toNullability(type), toJavadoc(type)));
         }
         return fields;
     }
@@ -306,7 +319,7 @@ public class STModel {
     private List<Field> getFields(EnumTypeDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( EnumValueDefinition fieldDef : def.getEnumValueDefinitions() ) {
-            fields.add(new Field(fieldDef.getName(), null));
+            fields.add(new Field(fieldDef.getName(), null, Nullability.NON_NULLABLE, toJavadoc(fieldDef)));
         }
         return fields;
     }
@@ -314,7 +327,7 @@ public class STModel {
     private List<Field> getFields(SchemaDefinition def) {
         List<Field> fields = new ArrayList<Field>();
         for ( OperationTypeDefinition fieldDef : def.getOperationTypeDefinitions() ) {
-            fields.add(new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getTypeName())));
+            fields.add(new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getTypeName()), Nullability.NON_NULLABLE, toJavadoc(fieldDef)));
         }
         return fields;
     }
@@ -386,6 +399,37 @@ public class STModel {
             return name;
         } else {
             throw new UnsupportedOperationException("Unknown Type="+type.getClass().getName());
+        }
+    }
+
+    private Nullability toNullability(Type type) {
+        if (type instanceof ListType) {
+            Type nestedType = ((ListType) type).getType();
+            Nullability nestedNullability = toNullability(nestedType);
+            return nestedNullability.equals(Nullability.NULLABLE) ? Nullability.NULLABLE : Nullability.NON_NULLABLE_CONTENT;
+        } else if (type instanceof NonNullType) {
+            Type nestedType = ((NonNullType) type).getType();
+            Nullability nestedNullability = toNullability(nestedType);
+            return nestedNullability.equals(Nullability.NULLABLE) ? Nullability.NON_NULLABLE : Nullability.NON_NULLABLE_CONTENT;
+        } else {
+            return Nullability.NULLABLE;
+        }
+    }
+
+    private String toJavadoc(Node<?> type) {
+        if (type.getComments().isEmpty()) {
+            return null;
+        } else if (type.getComments().size() == 1) {
+            return "/* " + type.getComments().get(0) + " */";
+        } else {
+            StringBuilder sb = new StringBuilder();
+            sb.append("/**");
+            for (Comment comment : type.getComments()) {
+                sb.append(" * ");
+                sb.append(comment.content);
+            }
+            sb.append(" */");
+            return sb.toString();
         }
     }
 
