@@ -1,6 +1,6 @@
 package com.distelli.graphql.apigen;
 
-import graphql.language.Comment;
+import com.google.common.base.Joiner;
 import graphql.language.Definition;
 import graphql.language.EnumTypeDefinition;
 import graphql.language.EnumValueDefinition;
@@ -29,28 +29,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 public class STModel {
-    private static Map<String, String> BUILTINS = new HashMap<String, String>(){{
-            put("Int", null);
-            put("Long", null);
-            put("Float", null);
-            put("String", null);
-            put("Boolean", null);
-            put("ID", null);
-            put("BigInteger", "java.math.BigInteger");
-            put("BigDecimal", "java.math.BigDecimal");
-            put("Byte", null);
-            put("Short", null);
-            put("Char", null);
-        }};
-    private static Map<String, String> RENAME = new HashMap<String, String>(){{
-            put("Int", "Integer");
-            put("ID", "String");
-            put("Char", "Character");
-            put("Float", "Double");
-        }};
-    private enum Nullability {
+    private static final Map<String, String> BUILTINS = new HashMap<String, String>() {{
+        put("Int", null);
+        put("Long", null);
+        put("Float", null);
+        put("String", null);
+        put("Boolean", null);
+        put("ID", null);
+        put("BigInteger", "java.math.BigInteger");
+        put("BigDecimal", "java.math.BigDecimal");
+        put("Byte", null);
+        put("Short", null);
+        put("Char", null);
+    }};
+    private static final Map<String, String> RENAME = new HashMap<String, String>() {{
+        put("Int", "Integer");
+        put("ID", "String");
+        put("Char", "Character");
+        put("Float", "Double");
+    }};
+    private static final Map<String, String> PRIMITIVE = new HashMap<String, String>() {{
+        put("Integer", "int");
+        put("Long", "long");
+        put("Double", "double");
+        put("Boolean", "boolean");
+        put("Byte", "byte");
+        put("Short", "short");
+        put("Character", "char");
+    }};
+
+    enum Nullability {
         NULLABLE,
         NON_NULLABLE,
         NON_NULLABLE_CONTENT
@@ -59,14 +70,17 @@ public class STModel {
     public static class Builder {
         private TypeEntry typeEntry;
         private Map<String, TypeEntry> referenceTypes;
+
         public Builder withTypeEntry(TypeEntry typeEntry) {
             this.typeEntry = typeEntry;
             return this;
         }
+
         public Builder withReferenceTypes(Map<String, TypeEntry> referenceTypes) {
             this.referenceTypes = referenceTypes;
             return this;
         }
+
         public STModel build() {
             return new STModel(this);
         }
@@ -83,45 +97,71 @@ public class STModel {
     }
 
     public static class Arg {
-        public String name;
-        public String type;
+        public final String name;
+        public final String type;
         public String graphQLType;
         public String defaultValue;
+
         public Arg(String name, String type) {
             this.name = name;
             this.type = type;
         }
+
+        @SuppressWarnings("unused")
         public String getUcname() {
             return ucFirst(name);
         }
     }
+
     // Field of Interface, Object, InputObject, UnionType (no names), Enum (no types)
     public static class Field {
-        public String name;
-        public String type;
-        public Nullability nullability;
-        public String javadoc;
+        public final String name;
+        public final String type;
+        public final Nullability nullability;
+        public final String javadoc;
         public DataResolver dataResolver;
         public String graphQLType;
         public List<Arg> args;
         public String defaultValue;
+
         public Field(String name, String type, Nullability nullability, String javadoc) {
             this.name = name;
             this.type = type;
             this.nullability = nullability;
             this.javadoc = javadoc;
         }
+
+        @SuppressWarnings("unused")
         public String getUcname() {
             return ucFirst(name);
         }
+
+        @SuppressWarnings("unused")
+        public String getNullsafename() {
+            if (PRIMITIVE.containsValue(type)) {
+                return name;
+            }
+            switch (nullability) {
+                case NULLABLE:
+                    return name;
+                case NON_NULLABLE:
+                    return "checkNotNull(" + name + ")";
+                case NON_NULLABLE_CONTENT:
+                    return "checkNonNullAndNonNullValues(" + name + ")";
+                default:
+                    throw new IllegalStateException("Unsupported nullability: " + nullability);
+            }
+        }
     }
-    private TypeEntry typeEntry;
-    private Map<String, TypeEntry> referenceTypes;
+
+    private final TypeEntry typeEntry;
+    private final Map<String, TypeEntry> referenceTypes;
     private List<Field> fields;
     public List<Interface> interfaces;
     private List<String> imports;
     private Field idField;
     private boolean gotIdField = false;
+
     private STModel(Builder builder) {
         this.typeEntry = builder.typeEntry;
         this.referenceTypes = builder.referenceTypes;
@@ -149,6 +189,7 @@ public class STModel {
         return typeEntry.getDefinition() instanceof EnumTypeDefinition;
     }
 
+    @SuppressWarnings("unused")
     public boolean isScalarType() {
         return typeEntry.getDefinition() instanceof ScalarTypeDefinition;
     }
@@ -165,6 +206,7 @@ public class STModel {
         return typeEntry.getDefinition() instanceof SchemaDefinition;
     }
 
+    @SuppressWarnings("unused")
     public String getPackageName() {
         return typeEntry.getPackageName();
     }
@@ -173,24 +215,35 @@ public class STModel {
         return typeEntry.getName();
     }
 
+    @SuppressWarnings("unused")
+    public String getJavadoc() {
+        return toJavadoc(typeEntry.getDefinition());
+    }
+
+    @SuppressWarnings("unused")
     public String getUcname() {
         return ucFirst(getName());
     }
 
     private static String ucFirst(String name) {
-        if ( null == name || name.length() < 1 ) return name;
+        if (null == name || name.length() < 1) {
+            return name;
+        }
         return name.substring(0, 1).toUpperCase() + name.substring(1);
     }
 
     private static String lcFirst(String name) {
-        if ( null == name || name.length() < 1 ) return name;
+        if (null == name || name.length() < 1) {
+            return name;
+        }
         return name.substring(0, 1).toLowerCase() + name.substring(1);
     }
 
+    @SuppressWarnings("unused")
     public synchronized Field getIdField() {
-        if ( ! gotIdField ) {
-            for ( Field field : getFields() ) {
-                if ( "id".equals(field.name) ) {
+        if (!gotIdField) {
+            for (Field field : getFields()) {
+                if ("id".equals(field.name)) {
                     idField = field;
                     break;
                 }
@@ -200,6 +253,7 @@ public class STModel {
         return idField;
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     public List<Interface> getInterfaces() {
 
         interfaces = new ArrayList<>();
@@ -210,43 +264,48 @@ public class STModel {
 
         ObjectTypeDefinition objectTypeDefinition = (ObjectTypeDefinition) typeEntry.getDefinition();
 
+        //noinspection rawtypes
         List<Type> interfaceTypes = objectTypeDefinition.getImplements();
 
-        for (Type anInterfaceType : interfaceTypes) {
+        for (Type<?> anInterfaceType : interfaceTypes) {
             Interface anInterface = new Interface();
-            anInterface.type = toJavaTypeName(anInterfaceType);
+            anInterface.type = toJavaTypeName(anInterfaceType, null, false, false);
             interfaces.add(anInterface);
         }
 
         return interfaces;
     }
 
+    @SuppressWarnings("unused")
     public List<DataResolver> getDataResolvers() {
         Map<String, DataResolver> resolvers = new LinkedHashMap<>();
-        for ( Field field : getFields() ) {
+        for (Field field : getFields()) {
             DataResolver resolver = field.dataResolver;
-            if ( null == resolver ) continue;
+            if (null == resolver) {
+                continue;
+            }
             resolvers.put(resolver.fieldType, resolver);
         }
         return new ArrayList<>(resolvers.values());
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     public synchronized List<String> getImports() {
-        if ( null == imports ) {
-            Definition def = typeEntry.getDefinition();
-            Set<String> names = new TreeSet<String>();
-            if ( isObjectType() ) {
-                addImports(names, (ObjectTypeDefinition)def);
-            } else if ( isInterfaceType() ) {
-                addImports(names, (InterfaceTypeDefinition)def);
-            } else if ( isInputObjectType() ) {
-                addImports(names, (InputObjectTypeDefinition)def);
-            } else if ( isUnionType() ) {
-                addImports(names, (UnionTypeDefinition)def);
-            } else if ( isEnumType() ) {
-                addImports(names, (EnumTypeDefinition)def);
-            } else if ( isSchemaType() ) {
-                addImports(names, (SchemaDefinition)def);
+        if (null == imports) {
+            Definition<?> def = typeEntry.getDefinition();
+            Set<String> names = new TreeSet<>();
+            if (isObjectType()) {
+                addImports(names, (ObjectTypeDefinition) def);
+            } else if (isInterfaceType()) {
+                addImports(names, (InterfaceTypeDefinition) def);
+            } else if (isInputObjectType()) {
+                addImports(names, (InputObjectTypeDefinition) def);
+            } else if (isUnionType()) {
+                addImports(names, (UnionTypeDefinition) def);
+            } else if (isEnumType()) {
+                addImports(names, (EnumTypeDefinition) def);
+            } else if (isSchemaType()) {
+                addImports(names, (SchemaDefinition) def);
             }
             imports = new ArrayList<>(names);
         }
@@ -254,20 +313,20 @@ public class STModel {
     }
 
     public synchronized List<Field> getFields() {
-        if ( null == fields ) {
-            Definition def = typeEntry.getDefinition();
-            if ( isObjectType() ) {
-                fields = getFields((ObjectTypeDefinition)def);
-            } else if ( isInterfaceType() ) {
-                fields = getFields((InterfaceTypeDefinition)def);
-            } else if ( isInputObjectType() ) {
-                fields = getFields((InputObjectTypeDefinition)def);
-            } else if ( isUnionType() ) {
-                fields = getFields((UnionTypeDefinition)def);
-            } else if ( isEnumType() ) {
-                fields = getFields((EnumTypeDefinition)def);
-            } else if ( isSchemaType() ) {
-                fields = getFields((SchemaDefinition)def);
+        if (null == fields) {
+            Definition<?> def = typeEntry.getDefinition();
+            if (isObjectType()) {
+                fields = getFields((ObjectTypeDefinition) def);
+            } else if (isInterfaceType()) {
+                fields = getFields((InterfaceTypeDefinition) def);
+            } else if (isInputObjectType()) {
+                fields = getFields((InputObjectTypeDefinition) def);
+            } else if (isUnionType()) {
+                fields = getFields((UnionTypeDefinition) def);
+            } else if (isEnumType()) {
+                fields = getFields((EnumTypeDefinition) def);
+            } else if (isSchemaType()) {
+                fields = getFields((SchemaDefinition) def);
             } else {
                 fields = Collections.emptyList();
             }
@@ -276,9 +335,9 @@ public class STModel {
     }
 
     private List<Field> getFields(ObjectTypeDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
+        List<Field> fields = new ArrayList<>();
+        for (FieldDefinition fieldDef : def.getFieldDefinitions()) {
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType(), fieldDef.getName(), false, false), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.graphQLType = toGraphQLType(fieldDef.getType());
             field.dataResolver = toDataResolver(fieldDef.getType());
             field.args = toArgs(fieldDef.getInputValueDefinitions());
@@ -288,9 +347,9 @@ public class STModel {
     }
 
     private List<Field> getFields(InterfaceTypeDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
+        List<Field> fields = new ArrayList<>();
+        for (FieldDefinition fieldDef : def.getFieldDefinitions()) {
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType(), fieldDef.getName(), false, false), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.args = toArgs(fieldDef.getInputValueDefinitions());
             fields.add(field);
         }
@@ -298,9 +357,9 @@ public class STModel {
     }
 
     private List<Field> getFields(InputObjectTypeDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( InputValueDefinition fieldDef : def.getInputValueDefinitions() ) {
-            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType()), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
+        List<Field> fields = new ArrayList<>();
+        for (InputValueDefinition fieldDef : def.getInputValueDefinitions()) {
+            Field field = new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getType(), fieldDef.getName(), false, false), toNullability(fieldDef.getType()), toJavadoc(fieldDef));
             field.graphQLType = toGraphQLType(fieldDef.getType());
             field.defaultValue = toJavaValue(fieldDef.getDefaultValue());
             fields.add(field);
@@ -309,33 +368,33 @@ public class STModel {
     }
 
     private List<Field> getFields(UnionTypeDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( Type type : def.getMemberTypes() ) {
-            fields.add(new Field(null, toJavaTypeName(type), toNullability(type), toJavadoc(type)));
+        List<Field> fields = new ArrayList<>();
+        for (Type<?> type : def.getMemberTypes()) {
+            fields.add(new Field(null, toJavaTypeName(type, null, false, false), toNullability(type), toJavadoc(type)));
         }
         return fields;
     }
 
     private List<Field> getFields(EnumTypeDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( EnumValueDefinition fieldDef : def.getEnumValueDefinitions() ) {
+        List<Field> fields = new ArrayList<>();
+        for (EnumValueDefinition fieldDef : def.getEnumValueDefinitions()) {
             fields.add(new Field(fieldDef.getName(), null, Nullability.NON_NULLABLE, toJavadoc(fieldDef)));
         }
         return fields;
     }
 
     private List<Field> getFields(SchemaDefinition def) {
-        List<Field> fields = new ArrayList<Field>();
-        for ( OperationTypeDefinition fieldDef : def.getOperationTypeDefinitions() ) {
-            fields.add(new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getTypeName()), Nullability.NON_NULLABLE, toJavadoc(fieldDef)));
+        List<Field> fields = new ArrayList<>();
+        for (OperationTypeDefinition fieldDef : def.getOperationTypeDefinitions()) {
+            fields.add(new Field(fieldDef.getName(), toJavaTypeName(fieldDef.getTypeName(), fieldDef.getName(), false, false), Nullability.NON_NULLABLE, toJavadoc(fieldDef)));
         }
         return fields;
     }
 
     private List<Arg> toArgs(List<InputValueDefinition> defs) {
         List<Arg> result = new ArrayList<>();
-        for ( InputValueDefinition def : defs ) {
-            Arg arg = new Arg(def.getName(), toJavaTypeName(def.getType()));
+        for (InputValueDefinition def : defs) {
+            Arg arg = new Arg(def.getName(), toJavaTypeName(def.getType(), def.getName(), false, false));
             arg.graphQLType = toGraphQLType(def.getType());
             arg.defaultValue = toJavaValue(def.getDefaultValue());
             result.add(arg);
@@ -343,72 +402,80 @@ public class STModel {
         return result;
     }
 
-    private String toJavaValue(Value value) {
+    @SuppressWarnings("unused")
+    private String toJavaValue(Value<?> value) {
         // TODO: Implement me!
         return null;
     }
 
-    private DataResolver toDataResolver(Type type) {
-        if ( type instanceof ListType ) {
-            DataResolver resolver = toDataResolver(((ListType)type).getType());
-            if ( null == resolver ) return null;
+    private DataResolver toDataResolver(Type<?> type) {
+        if (type instanceof ListType) {
+            DataResolver resolver = toDataResolver(((ListType) type).getType());
+            if (null == resolver) {
+                return null;
+            }
             resolver.listDepth++;
             return resolver;
-        } else if ( type instanceof NonNullType ) {
-            return toDataResolver(((NonNullType)type).getType());
-        } else if ( type instanceof TypeName ) {
-            String typeName = ((TypeName)type).getName();
-            if ( BUILTINS.containsKey(typeName) ) return null;
+        } else if (type instanceof NonNullType) {
+            return toDataResolver(((NonNullType) type).getType());
+        } else if (type instanceof TypeName) {
+            String typeName = ((TypeName) type).getName();
+            if (BUILTINS.containsKey(typeName)) {
+                return null;
+            }
             TypeEntry typeEntry = referenceTypes.get(typeName);
-            if ( !typeEntry.hasIdField() ) return null;
+            if (!typeEntry.hasIdField()) {
+                return null;
+            }
             DataResolver resolver = new DataResolver();
             resolver.fieldType = typeName + ".Resolver";
             resolver.fieldName = "_" + lcFirst(typeName) + "Resolver";
             return resolver;
         } else {
-            throw new UnsupportedOperationException("Unknown Type="+type.getClass().getName());
+            throw new UnsupportedOperationException("Unknown Type=" + type.getClass().getName());
         }
     }
 
-    private String toGraphQLType(Type type) {
-        if ( type instanceof ListType ) {
-            return "new GraphQLList(" + toGraphQLType(((ListType)type).getType()) + ")";
-        } else if ( type instanceof NonNullType ) {
-            return toGraphQLType(((NonNullType)type).getType());
-        } else if ( type instanceof TypeName ) {
-            String name = ((TypeName)type).getName();
-            if ( BUILTINS.containsKey(name) ) {
+    private String toGraphQLType(Type<?> type) {
+        if (type instanceof ListType) {
+            return "new GraphQLList(" + toGraphQLType(((ListType) type).getType()) + ")";
+        } else if (type instanceof NonNullType) {
+            return toGraphQLType(((NonNullType) type).getType());
+        } else if (type instanceof TypeName) {
+            String name = ((TypeName) type).getName();
+            if (BUILTINS.containsKey(name)) {
                 return "Scalars.GraphQL" + name;
             }
-            return "new GraphQLTypeReference(\""+name+"\")";
+            return "new GraphQLTypeReference(\"" + name + "\")";
         } else {
-            throw new UnsupportedOperationException("Unknown Type="+type.getClass().getName());
+            throw new UnsupportedOperationException("Unknown Type=" + type.getClass().getName());
         }
     }
 
-    private String toJavaTypeName(Type type) {
-        if ( type instanceof ListType ) {
-            return "List<" + toJavaTypeName(((ListType)type).getType()) + ">";
-        } else if ( type instanceof NonNullType ) {
-            return toJavaTypeName(((NonNullType)type).getType());
-        } else if ( type instanceof TypeName ) {
-            String name = ((TypeName)type).getName();
-            String rename = RENAME.get(name);
-            // TODO: scalar type directive to get implementation class...
-            if ( null != rename ) return rename;
-            return name;
-        } else {
-            throw new UnsupportedOperationException("Unknown Type="+type.getClass().getName());
-        }
-    }
-
-    private Nullability toNullability(Type type) {
+    private String toJavaTypeName(Type<?> type, String fieldName, boolean isNonNull, boolean isListItem) {
         if (type instanceof ListType) {
-            Type nestedType = ((ListType) type).getType();
+            return "List<" + toJavaTypeName(((ListType) type).getType(), fieldName, false, true) + ">";
+        } else if (type instanceof NonNullType) {
+            return toJavaTypeName(((NonNullType) type).getType(), fieldName, true, isListItem);
+        } else if (type instanceof TypeName) {
+            String typeName = ((TypeName) type).getName();
+            String typeRenamed = RENAME.getOrDefault(typeName, typeName);
+            if (isNonNull && !isListItem && (fieldName == null || !fieldName.toLowerCase().endsWith("id"))) {
+                typeRenamed = PRIMITIVE.getOrDefault(typeRenamed, typeRenamed);
+            }
+            return typeRenamed;
+        } else {
+            throw new UnsupportedOperationException("Unknown Type=" + type.getClass().getName());
+        }
+    }
+
+    static Nullability toNullability(Type<?> type) {
+        if (type instanceof ListType) {
+            Type<?> nestedType = ((ListType) type).getType();
             Nullability nestedNullability = toNullability(nestedType);
             return nestedNullability.equals(Nullability.NULLABLE) ? Nullability.NULLABLE : Nullability.NON_NULLABLE_CONTENT;
         } else if (type instanceof NonNullType) {
-            Type nestedType = ((NonNullType) type).getType();
+            Type<?> nestedType = ((NonNullType) type).getType();
             Nullability nestedNullability = toNullability(nestedType);
             return nestedNullability.equals(Nullability.NULLABLE) ? Nullability.NON_NULLABLE : Nullability.NON_NULLABLE_CONTENT;
         } else {
@@ -416,80 +483,76 @@ public class STModel {
         }
     }
 
-    private String toJavadoc(Node<?> type) {
+    static String toJavadoc(Node<?> type) {
         if (type.getComments().isEmpty()) {
             return null;
-        } else if (type.getComments().size() == 1) {
-            return "/* " + type.getComments().get(0) + " */";
         } else {
-            StringBuilder sb = new StringBuilder();
-            sb.append("/**");
-            for (Comment comment : type.getComments()) {
-                sb.append(" * ");
-                sb.append(comment.content);
-            }
-            sb.append(" */");
-            return sb.toString();
+            return "/** "
+                    + Joiner.on(" ").join(type.getComments().stream().map(comment -> comment.content.trim()).collect(Collectors.toList()))
+                    + " */";
         }
     }
 
     private void addImports(Collection<String> imports, ObjectTypeDefinition def) {
-        for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
+        for (FieldDefinition fieldDef : def.getFieldDefinitions()) {
             addImports(imports, fieldDef.getType());
         }
     }
 
     private void addImports(Collection<String> imports, InterfaceTypeDefinition def) {
-        for ( FieldDefinition fieldDef : def.getFieldDefinitions() ) {
+        for (FieldDefinition fieldDef : def.getFieldDefinitions()) {
             addImports(imports, fieldDef.getType());
         }
     }
 
     private void addImports(Collection<String> imports, InputObjectTypeDefinition def) {
-        for ( InputValueDefinition fieldDef : def.getInputValueDefinitions() ) {
+        for (InputValueDefinition fieldDef : def.getInputValueDefinitions()) {
             addImports(imports, fieldDef.getType());
         }
     }
 
     private void addImports(Collection<String> imports, UnionTypeDefinition def) {
-        for ( Type type : def.getMemberTypes() ) {
+        for (Type<?> type : def.getMemberTypes()) {
             addImports(imports, type);
         }
     }
 
+    @SuppressWarnings("unused")
     private void addImports(Collection<String> imports, EnumTypeDefinition def) {
         // No imports should be necessary...
     }
 
     private void addImports(Collection<String> imports, SchemaDefinition def) {
-        for ( OperationTypeDefinition fieldDef : def.getOperationTypeDefinitions() ) {
+        for (OperationTypeDefinition fieldDef : def.getOperationTypeDefinitions()) {
             addImports(imports, fieldDef.getTypeName());
         }
     }
 
-    private void addImports(Collection<String> imports, Type type) {
-        if ( type instanceof ListType ) {
+    private void addImports(Collection<String> imports, Type<?> type) {
+        if (type instanceof ListType) {
             imports.add("java.util.List");
-            addImports(imports, ((ListType)type).getType());
-        } else if ( type instanceof NonNullType ) {
-            addImports(imports, ((NonNullType)type).getType());
-        } else if ( type instanceof TypeName ) {
-            String name = ((TypeName)type).getName();
-            if ( BUILTINS.containsKey(name) ) {
+            addImports(imports, ((ListType) type).getType());
+        } else if (type instanceof NonNullType) {
+            addImports(imports, ((NonNullType) type).getType());
+        } else if (type instanceof TypeName) {
+            String name = ((TypeName) type).getName();
+            if (BUILTINS.containsKey(name)) {
                 String importName = BUILTINS.get(name);
-                if ( null == importName ) return;
+                if (null == importName) {
+                    return;
+                }
                 imports.add(importName);
             } else {
                 TypeEntry refEntry = referenceTypes.get(name);
                 // TODO: scalar name may be different... should read annotations for scalars.
-                if ( null == refEntry ) {
-                    throw new RuntimeException("Unknown type '"+name+"' was not defined in the schema");
+                if (null == refEntry) {
+                    throw new RuntimeException("Unknown type '" + name + "' was not defined in the schema");
                 } else {
                     imports.add(refEntry.getPackageName() + "." + name);
                 }
             }
         } else {
-            throw new RuntimeException("Unknown Type="+type.getClass().getName());
+            throw new RuntimeException("Unknown Type=" + type.getClass().getName());
         }
     }
 }
